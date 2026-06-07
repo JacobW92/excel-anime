@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Excel Anime Player (macOS)
-Uses AppleScript for zoom + Goto Scroll:=True to show exactly one frame.
-Supports multiple files for seamless sequential playback.
+Plays one or more Excel animation files seamlessly.
+Uses AppleScript for zoom + Goto Scroll:=True.
 """
 
 import sys
@@ -10,15 +10,6 @@ import time
 import string
 import subprocess
 from pathlib import Path
-
-
-def col_letter(n):
-    s = ""
-    while n > 0:
-        n -= 1
-        s = string.ascii_uppercase[n % 26] + s
-        n //= 26
-    return s
 
 
 def osa(cmd):
@@ -35,7 +26,6 @@ end tell
 
 
 def goto_row(row):
-    """Scroll so that `row` appears at the top-left (Goto Scroll:=True)."""
     return osa(f'''
 tell application "Microsoft Excel"
     goto reference (range "A{row}" of active sheet of active workbook) scroll true
@@ -43,44 +33,44 @@ end tell
 ''')
 
 
-def play_part(app, excel_path, width, height, num_frames, fps, first_part=False):
-    """Play one Excel file. Returns (errors, elapsed)."""
-    import xlwings as xw
+def calc_zoom(width, height):
+    """Calculate zoom to fit one frame in the window."""
+    cell_px = 15
+    zoom_h = int(800 / (height * cell_px) * 100)
+    zoom_w = int(1360 / (width * cell_px) * 100)
+    return max(10, min(zoom_h, zoom_w))
 
+
+def count_frames(app, excel_path, height):
+    """Detect number of frames from file."""
+    wb = app.books.open(str(excel_path))
+    last_row = wb.sheets[0].range("A1").end("down").row
+    wb.close()
+    return last_row // height
+
+
+def play_file(app, excel_path, width, height, num_frames, fps,
+              is_first=False):
+    """Play one Excel file. Returns (errors, elapsed)."""
     print(f"\n{'─' * 52}")
     print(f"  📂 {Path(excel_path).name}  ({num_frames} frames, ~{num_frames/fps:.0f}s)")
     print(f"{'─' * 52}")
 
-    if first_part:
-        print("[*] Opening file...")
-        wb = app.books.open(str(excel_path))
-        print("[*] Loading (please wait)...")
+    wb = app.books.open(str(excel_path))
+
+    if is_first:
+        print("[*] Loading first file (please wait)...")
         time.sleep(15)
     else:
-        # Close previous workbook, open next
-        try:
-            for b in app.books:
-                b.close()
-        except Exception:
-            pass
-        print("[*] Opening next part...")
-        wb = app.books.open(str(excel_path))
-        print("[*] Loading...")
-        time.sleep(10)
+        print("[*] Switching to next part...")
+        time.sleep(5)
 
-    # Zoom to fit
-    cell_px = 15
-    zoom_h = int(800 / (height * cell_px) * 100)
-    zoom_w = int(1360 / (width * cell_px) * 100)
-    zoom_pct = max(10, min(zoom_h, zoom_w))
+    zoom_pct = calc_zoom(width, height)
     set_zoom(zoom_pct)
     time.sleep(1)
-
-    # Go to top
     goto_row(1)
     time.sleep(1)
 
-    # Playback
     delay = 1.0 / fps
     start = time.time()
     errors = 0
@@ -93,7 +83,7 @@ def play_part(app, excel_path, width, height, num_frames, fps, first_part=False)
         if r.returncode != 0:
             errors += 1
             if errors > 30:
-                print(f"    ⚠ Too many errors ({errors}), skipping to next part.")
+                print(f"    ⚠ Too many errors, skipping.")
                 break
 
         if (i + 1) % 40 == 0:
@@ -108,13 +98,20 @@ def play_part(app, excel_path, width, height, num_frames, fps, first_part=False)
 
     elapsed = time.time() - start
     print(f"  ✅ Part done: {elapsed:.0f}s, {errors} errors")
+
+    # Close workbook after playing
+    try:
+        wb.close()
+    except Exception:
+        pass
+
     return errors, elapsed
 
 
 def main():
-    # Parse args: play.py file1.xlsx [file2.xlsx ...] [--width W] [--height H] [--fps F]
     files = []
     width, height, fps = 200, 112, 8
+
     i = 1
     while i < len(sys.argv):
         a = sys.argv[i]
@@ -137,16 +134,13 @@ def main():
     except ImportError:
         sys.exit("pip install xlwings")
 
-    # Calculate total frames from each file's row count
-    # For auto-detection, we use height to estimate frames
     print("=" * 52)
     print("   🎬 Excel Anime Player")
     print("=" * 52)
     print(f"   Files:    {len(files)}")
     print(f"   Frame:    {width}×{height}  |  {fps} fps")
-    print("=" * 52)
 
-    # Close existing Excel
+    # Count frames per file
     print("\n[*] Closing existing Excel...")
     osa('quit app "Microsoft Excel"')
     time.sleep(2)
@@ -155,7 +149,14 @@ def main():
     app = xw.App(visible=True)
     app.activate()
 
-    # Ready
+    frame_counts = []
+    for f in files:
+        n = count_frames(app, f, height)
+        frame_counts.append(n)
+        total_est = sum(frame_counts) / fps
+    print(f"   Total:    {sum(frame_counts)} frames, ~{total_est:.0f}s")
+    print("=" * 52)
+
     print()
     print("=" * 52)
     print("   🎥 START SCREEN RECORDING NOW!")
@@ -166,23 +167,16 @@ def main():
     total_start = time.time()
     total_errors = 0
 
-    for idx, f in enumerate(files):
-        # Auto-detect frame count from file
-        wb_temp = app.books.open(str(f))
-        last_row = wb_temp.sheets[0].range("A1").end("down").row
-        wb_temp.close()
-        num_frames = last_row // height
-        print(f"  Detected {num_frames} frames in {Path(f).name}")
-
-        errors, elapsed = play_part(
-            app, f, width, height, num_frames, fps,
-            first_part=(idx == 0)
+    for idx, (f, n) in enumerate(zip(files, frame_counts)):
+        errors, elapsed = play_file(
+            app, f, width, height, n, fps,
+            is_first=(idx == 0)
         )
         total_errors += errors
 
     total_elapsed = time.time() - total_start
     print(f"\n{'=' * 52}")
-    print(f"   ✅ All done!  {total_elapsed:.0f}s  |  {total_errors} total errors")
+    print(f"   ✅ All done!  {total_elapsed:.0f}s  |  {total_errors} errors")
     print(f"{'=' * 52}")
 
 
