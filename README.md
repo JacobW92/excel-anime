@@ -112,13 +112,15 @@ excel-anime/
 └── README.md            # 本文件
 ```
 
-生成的文件（不需要提交）：
+运行后自动生成的文件（不需要提交到 Git，已在 `.gitignore` 中排除）：
 
-```
-*_excel.xlsx             # 生成的 Excel 像素动画
-*_stacked.png            # 竖排拼接长图
-anime_player_macro.bas   # 自动生成的 VBA 宏
-```
+| 生成文件 | 说明 |
+|----------|------|
+| `*_excel.xlsx` | 生成的 Excel 像素动画 |
+| `*_stacked.png` | 竖排拼接长图（加 `--save-stacked` 时生成） |
+| `anime_player_macro.bas` | VBA 宏文件，由 `video_to_excel.py` 自动生成，用于 Windows 手动播放 |
+
+> 💡 **注意**：`anime_player_macro.bas` 不包含在仓库中，因为它是根据你的视频参数（帧数、分辨率、帧率）动态生成的。每次运行 `video_to_excel.py` 时会自动创建。
 
 ## ⚠️ 注意事项
 
