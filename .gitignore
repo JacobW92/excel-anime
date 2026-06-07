@@ -1,0 +1,21 @@
+# 生成的产物
+*.xlsx
+*_stacked.png
+anime_player_macro.bas
+play_excel_anime.sh
+play_excel_anime.applescript
+
+# 用户视频文件
+*.mp4
+*.mp3
+*.mkv
+*.avi
+*.mov
+
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+
+# 测试文件
+test_*
