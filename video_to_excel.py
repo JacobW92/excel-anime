@@ -214,6 +214,8 @@ def main():
     ap.add_argument("--colors", type=int, default=32,
                     help="Colour levels per channel (default 32 → max 32,768 colours). "
                          "Use 16 for very safe (4,096 colours). Excel limit ≈ 64,000 unique formats.")
+    ap.add_argument("--parts", type=int, default=1,
+                    help="Split into N smaller Excel files for smoother playback (default 1 = single file)")
     args = ap.parse_args()
 
     # ── checks ───────────────────────
@@ -238,6 +240,7 @@ def main():
     print(f"   Video      {args.video}")
     print(f"   FPS        {args.fps}")
     print(f"   Resolution {args.width} x {args.height}")
+    print(f"   Parts      {args.parts}")
     print(f"   Output     {args.output}")
     print("=" * 52)
 
@@ -250,28 +253,79 @@ def main():
             frames = frames[: args.max_frames]
             print(f"    Capped at {args.max_frames} frames")
 
-        stacked = create_stacked_image(frames, args.width, args.height)
+        n = len(frames)
+        parts = args.parts
 
-        if args.save_stacked:
-            p = args.output.replace(".xlsx", "_stacked.png")
-            stacked.save(p)
-            print(f"[✓] Stacked PNG → {p}")
+        if parts <= 1:
+            # Single file (original behaviour)
+            stacked = create_stacked_image(frames, args.width, args.height)
 
-        generate_excel(stacked, args.width, args.height, len(frames), args.fps,
-                       args.output, levels_per_channel=args.colors)
+            if args.save_stacked:
+                p = args.output.replace(".xlsx", "_stacked.png")
+                stacked.save(p)
+                print(f"[✓] Stacked PNG → {p}")
 
-    vba_path = generate_vba(args.width, args.height, len(frames), args.fps, out_dir)
+            generate_excel(stacked, args.width, args.height, n, args.fps,
+                           args.output, levels_per_channel=args.colors)
+            generate_vba(args.width, args.height, n, args.fps, out_dir)
+        else:
+            # Split into multiple files
+            chunk = (n + parts - 1) // parts  # ceil division
+            output_files = []
 
-    # ── instructions ─────────────────
+            for p_idx in range(parts):
+                start = p_idx * chunk
+                end = min(start + chunk, n)
+                if start >= n:
+                    break
+                part_frames = frames[start:end]
+                part_n = len(part_frames)
+
+                # Generate output filename: name_part1.xlsx, name_part2.xlsx, ...
+                base = args.output.replace(".xlsx", "")
+                part_path = f"{base}_part{p_idx+1}.xlsx"
+
+                print(f"\n{'─' * 52}")
+                print(f"  Part {p_idx+1}/{parts}: frames {start+1}-{end} ({part_n} frames)")
+                print(f"{'─' * 52}")
+
+                stacked = create_stacked_image(part_frames, args.width, args.height)
+                generate_excel(stacked, args.width, args.height, part_n, args.fps,
+                               part_path, levels_per_channel=args.colors)
+                output_files.append((part_path, part_n))
+
+            # Save stacked image for the full video
+            if args.save_stacked:
+                full_stacked = create_stacked_image(frames, args.width, args.height)
+                p = args.output.replace(".xlsx", "_stacked.png")
+                full_stacked.save(p)
+                print(f"\n[✓] Stacked PNG → {p}")
+
+            # Generate VBA for each part
+            for p_idx, (part_path, part_n) in enumerate(output_files):
+                generate_vba(args.width, args.height, part_n, args.fps, out_dir)
+
+            # Print play instructions
+            print()
+            print("=" * 52)
+            print(f"   Split into {len(output_files)} parts")
+            print("=" * 52)
+            total_frames = sum(pn for _, pn in output_files)
+            print(f"   Total: {total_frames} frames, ~{total_frames / args.fps:.0f}s")
+            print()
+            print("   Play command:")
+            print(f"   python play.py {output_files[0][0]} {args.width} {args.height} {output_files[0][1]} {args.fps}")
+            for p_idx, (part_path, part_n) in enumerate(output_files[1:], 1):
+                print(f"   python play.py {part_path} {args.width} {args.height} {part_n} {args.fps}")
+            print("=" * 52)
+            return
+
+    # ── instructions (single file) ─────────────────
     print()
     print("=" * 52)
     print("   How to play")
     print("=" * 52)
-    print(f"   1. Open  {args.output}  in Excel")
-    print(f"   2. 另存为 .xlsm 格式（启用宏）")
-    print(f"   3. Alt+F11 → 文件 → 导入文件 → {vba_path}")
-    print(f"   4. F5 运行 PlayAnimation")
-    print(f"   5. 录屏！")
+    print(f"   python play.py {args.output} {args.width} {args.height} {n} {args.fps}")
     print("=" * 52)
 
 
